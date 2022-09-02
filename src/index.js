@@ -1,24 +1,41 @@
 import express from 'express';
 import cors from 'cors';
 import dayjs from 'dayjs';
+import { MongoClient } from 'mongodb';
+import dotenv from 'dotenv';
+import joi from 'joi';
 
+dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const participants = [];
-const messages = [];
+let db;
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+mongoClient.connect().then(() => {
+    db = mongoClient.db('bate_papo_uol');
+});
 
-app.post("/participants", (req, res) => {
+app.post("/participants", async (req, res) => {
+
+    const allParticipants = await db.collection("participants").find().toArray();
+    const checkParticipants = allParticipants.filter(p => p.name === name);
+
+    const useScheme = joi.object({ name: joi.string().required(),checkParticipants: joi.array().max(0) });
+    const validation = useScheme.validate(req.body, { abortEarly: true });
+
     const { name } = req.body;
-    if (!name) {
+
+    if (validation.error) {
+        console.log(validation.error.details);
         return res.sendStatus(422)
     }
-    participants.push({
+
+    db.collection("participants").insertOne({
         name,
         lastStatus: Date.now()
-    })
-    messages.push({
+    });
+    db.collection("messages").insertOne({
         from: name,
         to: 'Todos',
         text: 'entra na sala...',
@@ -29,34 +46,40 @@ app.post("/participants", (req, res) => {
 });
 
 app.get("/participants", (req, res) => {
-    res.send(participants);
+    db.collection("participants").find().toArray().then(p => res.send(p));
 });
 
-app.get("/messages",(req,res) =>{
-    res.send(messages);
+app.get("/messages", (req, res) => {
+    db.collection("messages").find().toArray().then(p => res.send(p));
 })
 
-app.post("/messages",(req,res) =>{
-    console.log(req.body)
-    const {to,text,type} = req.body;
+app.post("/messages", async (req, res) => {
+
     const from = req.headers.user;
-    console.log(from);
-    const sendUser = participants.filter(p => p.name === from);
-    console.log(sendUser);
-    if(!to || !text){
+    const allParticipants = await db.collection("participants").find().toArray();
+    const sendUser = allParticipants.filter(p => p.name === from);
+
+    const useScheme = joi.object({
+        to: joi.string().required(),
+        text: joi.string().required(),
+        type: joi.string().required(),
+        sendUser: joi.array().min(1).required()
+    });
+    const validate = useScheme.validate({...req.body,sendUser}, { abortEarly: true });
+    
+    if(validate.error){
         return res.sendStatus(422);
     }
-    if(type !== 'message' && type !== 'private_message'){
-        return res.sendStatus(422);
-    }
-    if(sendUser.length === 0){
-        return res.sendStatus(422);
-    }
-    messages.push({
+
+    const { to, text, type } = req.body;
+
+    db.collection('messages').insertOne({
         to,
         text,
         type,
-    })
+        from
+    });
+
     res.sendStatus(201);
 })
 
